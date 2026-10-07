@@ -1,8 +1,10 @@
-// End-to-end check of the API against a running dev server and a seeded database.
+// End-to-end check of the API against a running dev server.
 //   npm run smoke                 (BASE_URL defaults to http://localhost:3002)
-// Signs in as OWNER_EMAIL and a demo teammate using the dev_code returned outside production.
+// Signs in as OWNER_EMAIL (dev_code returned outside production), works in a throwaway
+// workspace with an invited teammate, then deletes everything it created.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import pg from 'pg';
 
 const root = join(import.meta.dirname, '..');
 for (const f of ['.env.local', '.env']) if (existsSync(join(root, f))) process.loadEnvFile(join(root, f));
@@ -55,24 +57,34 @@ check('anonymous → 401', (await anon.get('/api/me')).status === 401);
 check('uninvited email → 403', (await anon.post('/api/auth/otp', { email: 'nobody@nowhere.test' })).status === 403);
 
 const owner = await signIn(OWNER);
-const marc = await signIn('marc@northwind.test');
-
 const me = await owner.get('/api/me');
 check('GET /api/me', me.status === 200 && me.json.data.email === OWNER.toLowerCase(), me.json);
-const ws = (await owner.get('/api/workspaces')).json.data.find((w) => w.slug === 'northwind');
-check('owner is owner of Northwind', ws?.role === 'owner', ws);
+
+const stamp = Date.now().toString(36);
+const created = await owner.post('/api/workspaces', { name: `Smoke ${stamp}`, slug: `smoke-${stamp}` });
+check('create throwaway workspace', created.status === 201, created.json);
+const ws = (await owner.get('/api/workspaces')).json.data.find((w) => w.slug === `smoke-${stamp}`);
+check('creator is owner', ws?.role === 'owner', ws);
 const W = `/api/workspaces/${ws.id}`;
+const cleanupUsers = [];
+
+const mateEmail = `smoke-${stamp}@example.test`;
+check('invite teammate', (await owner.post(`${W}/invitations`, { email: mateEmail })).status === 201);
+const marc = await signIn(mateEmail);
+const marcMe = (await marc.get('/api/me')).json.data;
+cleanupUsers.push(marcMe.id);
 
 // --- sidebar, members, channels ----------------------------------------
 const side = await owner.get(`${W}/conversations`);
 check('sidebar lists #general', side.json.data.channels.some((c) => c.name === 'general'), side.json);
 const browse = await owner.get(`${W}/conversations?browse=1`);
-check('browse lists 6 public channels', browse.json.data.length === 6, browse.json.data.length);
+check('browse lists #general', browse.json.data.length === 1, browse.json.data.length);
 const members = await owner.get(`${W}/members`);
-check('members include demo teammates', members.json.data.members.length >= 5, members.json.data.counts);
+check('members: owner + teammate', members.json.data.members.length === 2, members.json.data.counts);
 
 const general = side.json.data.channels.find((c) => c.name === 'general');
 const G = `/api/conversations/${general.id}`;
+for (const t of ['one', 'two', 'three']) await owner.post(`${G}/messages`, { text: `page ${t}` });
 const page = await owner.get(`${G}/messages?limit=2`);
 check('timeline paginates', page.json.data.messages.length === 2 && page.json.data.next_before, page.json.data.next_before);
 
@@ -96,7 +108,7 @@ check('SSE stream opens', sse.status === 200 && sse.headers.get('content-type')?
 await new Promise((r) => setTimeout(r, 300));
 
 // --- messages, threads, reactions, mentions ------------------------------
-const msg = await owner.post(`${G}/messages`, { text: 'Smoke test hello @Marc Dubois' });
+const msg = await owner.post(`${G}/messages`, { text: `Smoke test hello @${marcMe.display_name}` });
 check('post message', msg.status === 201 && msg.json.data.author.email === undefined && msg.json.data.body.includes('Smoke'), msg.json);
 const M = `/api/messages/${msg.json.data.id}`;
 const reply = await marc.post(`${M}/replies`, { text: 'Reply from Marc', also_send_to_channel: true });
@@ -125,7 +137,7 @@ const read = await marc.post(`${G}/read`, { message_id: reply.json.data.id });
 check('mark read', read.status === 200, read.json);
 
 // --- DMs -----------------------------------------------------------------
-const marcId = (await marc.get('/api/me')).json.data.id;
+const marcId = marcMe.id;
 const dm = await owner.post(`${W}/dms`, { user_ids: [marcId] });
 const dm2 = await marc.post(`${W}/dms`, { user_ids: [me.json.data.id] });
 check('open DM is idempotent', dm.json.data.kind === 'dm' && dm.json.data.id === dm2.json.data.id, [dm.json, dm2.json]);
@@ -146,9 +158,10 @@ check('invite returns link', inv.status === 201 && inv.json.data.invite_url.incl
 check('members cannot invite', (await marc.post(`${W}/invitations`, { email: 'x@example.test' })).status === 403);
 check('revoke invite', (await owner.del(`/api/invitations/${inv.json.data.invitation.id}`)).status === 200);
 
-const deploys = browse.json.data.find((c) => c.name === 'deploys');
+const deploys = (await owner.post(`${W}/conversations`, { name: 'deploys' })).json.data;
 const app = await owner.post(`${W}/apps`, { name: 'CI Bot', kind: 'bot', default_conversation_id: deploys.id });
 check('create app', app.status === 201 && app.json.data.token.startsWith('xoxb-') && app.json.data.webhook_url, app.json);
+cleanupUsers.push(app.json.data.app.bot_user_id);
 const bot = await fetch(`${BASE}/api/bot/chat.postMessage`, {
   method: 'POST',
   headers: { authorization: `Bearer ${app.json.data.token}`, 'content-type': 'application/json' },
@@ -167,6 +180,18 @@ ac.abort();
 const got = events.join('');
 check('marc received realtime events', got.includes('event: change') && got.includes(`"message_id":${msg.json.data.id}`), got.slice(0, 300));
 check('private channel events not leaked', !got.includes(ch.json.data.id));
+
+check('delete channel', (await owner.del(`/api/conversations/${deploys.id}`)).status === 200);
+check("#general can't be deleted", (await owner.del(G)).status === 422);
+
+// Remove everything this run created.
+const wsDel = await owner.del(W);
+check('delete throwaway workspace', wsDel.status === 200, wsDel.json);
+const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+await db.connect();
+await db.query('delete from chat.messages where user_id = any($1::uuid[])', [cleanupUsers]);
+await db.query('delete from chat.users where id = any($1::uuid[])', [cleanupUsers]);
+await db.end();
 
 check('logout', (await owner.post('/api/auth/logout')).status === 200);
 check('session gone after logout', (await owner.get('/api/me')).status === 401);

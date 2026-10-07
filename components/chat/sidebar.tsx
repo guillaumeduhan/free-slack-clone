@@ -202,12 +202,14 @@ function useSectionRows<T extends { id: string; unread: number }>(section: Secti
   return { shown, rest: Math.max(0, rows.length - L), canLess: !q && rows.length <= L && L > PAGE && rows.length > PAGE };
 }
 
-function Row({ selected, unread, onClick, icon, children, trailing, wide }: {
-  selected: boolean; unread: number; onClick: () => void; icon: ReactNode; children: ReactNode; trailing?: ReactNode; wide?: boolean;
+function Row({ selected, unread, onClick, onContextMenu, icon, children, trailing, wide }: {
+  selected: boolean; unread: number; onClick: () => void; onContextMenu?: (e: React.MouseEvent) => void;
+  icon: ReactNode; children: ReactNode; trailing?: ReactNode; wide?: boolean;
 }) {
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`flex h-9 cursor-pointer items-center ${wide ? 'gap-2.5' : 'gap-2'} rounded-md px-1.5 text-base ${selected ? 'bg-line text-txt' : 'text-txt3 hover:bg-hover'}`}
       style={{ fontWeight: unread ? 600 : 400 }}
     >
@@ -246,6 +248,12 @@ function Channels() {
               selected={c.id === selected}
               unread={c.unread}
               onClick={() => open(c)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                useUi.getState().set({
+                  ctx: { section: 'channel', conversationId: c.id, x: Math.min(e.clientX, window.innerWidth - 270), y: Math.min(e.clientY, window.innerHeight - 220) },
+                });
+              }}
               icon={
                 <span className="flex size-[22px] flex-none items-center justify-center opacity-80">
                   {c.kind === 'private_channel' ? <LockIcon size={17} strokeWidth={2.2} /> : <HashIcon size={18} />}

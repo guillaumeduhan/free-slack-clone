@@ -194,7 +194,7 @@ function General({ ws }: { ws: Workspace }) {
             onChange={(e) => edit(() => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')))}
             className="h-full min-w-0 flex-1 border-0 bg-transparent px-3 text-sm font-normal text-txt outline-none"
           />
-          <span className="flex h-full items-center border-l border-line3 bg-hover px-3 text-sm font-normal text-mute">.northwind.chat</span>
+          <span className="flex h-full items-center border-l border-line3 bg-hover px-3 text-sm font-normal text-mute">.{typeof window === 'undefined' ? '' : window.location.hostname}</span>
         </div>
       </label>
       <label className={FIELD_LABEL}>

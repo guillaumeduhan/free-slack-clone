@@ -13,7 +13,7 @@ import { ChannelView } from './channel-view';
 import { FeedView } from './feed-view';
 import { AppsList, AppDetail, AddAppDialog } from './apps-view';
 import { ThreadPanel } from './thread-panel';
-import { ContextMenu, HoverCardPopup, Lightbox, DeleteDialog, ReactionPicker } from './overlays';
+import { ContextMenu, HoverCardPopup, Lightbox, DeleteDialog, DeleteChannelDialog, ReactionPicker } from './overlays';
 import { ChannelDialog, DmDialog, WorkspaceDialog, ProfileDialog, BrowseDialog } from './dialogs';
 import { MembersDialog } from './members-dialog';
 import { SettingsDialog } from './settings-dialog';
@@ -115,6 +115,7 @@ function Shell() {
       <SettingsDialog />
       <AddAppDialog />
       <DeleteDialog />
+      <DeleteChannelDialog />
       <ReactionPicker />
       <ContextMenu />
       <HoverCardPopup />

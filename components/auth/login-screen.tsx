@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/client/api';
+import { initials } from '@/lib/client/format';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSignIn } from '@/hooks/use-sign-in';
 import { Button } from '@/components/ui/button';
@@ -16,7 +18,7 @@ const ERRORS: Record<string, string> = {
   no_access: 'Your account no longer has access to a workspace. Ask an admin to invite you again.',
 };
 
-export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
+export function LoginScreen() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get('next');
@@ -25,6 +27,11 @@ export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
   const [name, setName] = useState('');
   const [title, setTitle] = useState('');
   const urlError = ERRORS[params.get('error') ?? ''];
+  const [workspace, setWorkspace] = useState('');
+  useEffect(() => {
+    api<{ name: string }>('GET', '/api/auth/workspace').then((w) => setWorkspace(w.name)).catch(() => {});
+  }, []);
+  const wsName = s.invitation?.workspace_name ?? workspace;
 
   const verify = async (code: string) => {
     if (s.loading) return;
@@ -35,7 +42,7 @@ export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
     <div className="flex min-h-screen flex-col bg-rail">
       <header className="flex items-center justify-between gap-3 px-6 py-5">
         <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-accent text-[15px] font-black text-white">N</div>
+          <div className="flex size-8 items-center justify-center rounded-lg bg-accent text-[15px] font-black text-white">{initials(wsName || 'Team Chat').slice(0, 1)}</div>
           <span className="text-[17px] font-black">Team Chat</span>
         </div>
         <ThemeToggle />
@@ -50,7 +57,7 @@ export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
               <div className="flex flex-col gap-5">
                 <div>
                   <h1 className="text-[26px] font-black tracking-[-0.01em]">
-                    {s.invitation ? 'Accept your invitation' : 'Sign in to Northwind'}
+                    {s.invitation ? 'Accept your invitation' : `Sign in to ${wsName || 'your workspace'}`}
                   </h1>
                   <p className="mt-1.5 text-[15px] text-pretty text-mute">
                     {s.invitation
@@ -76,7 +83,7 @@ export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
                   value={s.email}
                   readOnly={!!s.invitation}
                   invalid={!!s.denied || !!s.fieldError}
-                  placeholder="name@northwind.co"
+                  placeholder="name@company.com"
                   onChange={(e) => { s.setEmail(e.target.value); s.setDenied(null); s.setFieldError(''); }}
                   onKeyDown={(e) => e.key === 'Enter' && !s.loading && s.sendCode(s.email)}
                 />
@@ -175,20 +182,6 @@ export function LoginScreen({ demoAccounts }: { demoAccounts: string[] }) {
             <span>Access is limited to members and invited guests of this workspace. Accounts can&apos;t be created without an invitation.</span>
           </div>
 
-          {demoAccounts.length > 0 && (
-            <details className="px-1 text-[13px] text-mute">
-              <summary className="cursor-pointer font-bold">Test accounts</summary>
-              <div className="mt-2 flex flex-col gap-1 font-mono text-xs">
-                {demoAccounts.map((a) => (
-                  <button key={a} className="cursor-pointer text-left outline-none hover:text-txt"
-                    onClick={() => { if (s.step === 'email' && !s.invitation) { s.setEmail(a); s.setDenied(null); } }}>
-                    {a}
-                  </button>
-                ))}
-                <span>The sign-in code is shown on the next screen (dev mode).</span>
-              </div>
-            </details>
-          )}
         </div>
       </main>
     </div>

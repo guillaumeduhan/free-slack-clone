@@ -115,6 +115,27 @@ function CtxPanel({ ctx }: { ctx: CtxMenu }) {
         items.push(T('Delete message…', <TrashIcon />, () => set({ deleteTarget: msg.id }), { divider: true, danger: true }));
       }
     }
+  } else if (sec === 'channel') {
+    const c = sidebar?.channels.find((x) => x.id === ctx.conversationId);
+    const isAdmin = ws?.role === 'owner' || ws?.role === 'admin';
+    title = c ? `${c.kind === 'private_channel' ? '🔒' : '#'} ${c.name}` : 'Channel';
+    if (c) {
+      if (c.unread > 0 && c.last_message_id != null) {
+        items.push(T('Mark as read', <CheckSquareIcon />, () => {
+          const wsId = useUi.getState().workspaceId;
+          if (wsId) markRead(c.id, c.last_message_id!, wsId).catch(() => {});
+        }));
+      }
+      items.push(T('View members', <InviteIcon />, () => set({ membersOf: c.id })));
+      if (c.name !== 'general') {
+        items.push(T('Leave channel', <LogoutIcon />, () => {
+          api('DELETE', `/api/conversations/${c.id}/members`)
+            .then(() => refresh(`/api/workspaces/${useUi.getState().workspaceId}/conversations`))
+            .catch(() => {});
+        }));
+        if (isAdmin) items.push(T('Delete channel…', <TrashIcon />, () => set({ deleteChannel: c.id }), { divider: true, danger: true }));
+      }
+    }
   } else if (sec === 'ws') {
     title = ws?.name ?? '';
     items = [
@@ -158,10 +179,10 @@ function CtxPanel({ ctx }: { ctx: CtxMenu }) {
     <>
       <div onClick={dismiss} onContextMenu={dismiss} className="fixed inset-0 z-[70]" />
       <div
-        className="fixed z-[71] w-[260px] rounded-[10px] border border-line3 bg-hover py-2 text-sm shadow-[0_16px_40px_rgba(0,0,0,.55)]"
+        className="fixed z-[71] w-max max-w-[min(360px,calc(100vw-16px))] min-w-[260px] rounded-[10px] border border-line3 bg-hover py-2 text-sm shadow-[0_16px_40px_rgba(0,0,0,.55)]"
         style={{ top: ctx.y, left: ctx.x }}
       >
-        <div className="px-4 pt-1 pb-2 text-xs font-bold text-mute">{title}</div>
+        <div className="truncate px-4 pt-1 pb-2 text-xs font-bold text-mute">{title}</div>
         {items.map((it) => (
           <div key={it.label}>
             {it.divider && <div className="my-1.5 h-px bg-line3" />}
@@ -174,7 +195,7 @@ function CtxPanel({ ctx }: { ctx: CtxMenu }) {
               )}
             >
               <span className="flex size-[18px] flex-none items-center justify-center">{it.icon}</span>
-              <span className="flex-1">{it.label}</span>
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap">{it.label}</span>
               {it.hasSub && <ChevronRightIcon size={14} />}
             </div>
           </div>
@@ -191,7 +212,7 @@ function CtxPanel({ ctx }: { ctx: CtxMenu }) {
                 className="flex h-[34px] cursor-pointer items-center gap-3 px-4 text-txt2 hover:bg-[#7c3aed] hover:text-white"
               >
                 <span className="flex size-[18px] flex-none items-center justify-center">{it.icon}</span>
-                <span className="flex-1">{it.label}</span>
+                <span className="min-w-0 flex-1 truncate whitespace-nowrap">{it.label}</span>
               </div>
             ))}
           </div>
@@ -388,6 +409,51 @@ export function DeleteDialog() {
       <div className="mt-5 flex justify-end gap-2">
         <DialogButton variant="secondary" onClick={close}>Cancel</DialogButton>
         <DialogButton variant="danger" onClick={confirm}>Delete</DialogButton>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Delete channel confirmation (owners and admins)
+// ---------------------------------------------------------------------
+export function DeleteChannelDialog() {
+  const id = useUi((s) => s.deleteChannel);
+  const { data: sidebar } = useSidebar();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!id) return null;
+  const c = sidebar?.channels.find((x) => x.id === id);
+  const label = c ? `${c.kind === 'private_channel' ? '🔒' : '#'} ${c.name}` : 'this channel';
+
+  const close = () => { useUi.getState().set({ deleteChannel: null }); setError(''); };
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api('DELETE', `/api/conversations/${id}`);
+      const s = useUi.getState();
+      // The shell reopens #general when the open conversation disappears.
+      s.set({ deleteChannel: null, ...(s.conversationId === id && { conversationId: null, threadId: null }) });
+      await refresh(`/api/workspaces/${s.workspaceId}/conversations`, '/api/me/feed');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete the channel');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={close} width={460} top="16vh" z={80} className="p-5">
+      <div className="text-lg font-black">Delete channel</div>
+      <div className="mt-1.5 text-sm text-mute">
+        Are you sure you want to delete <strong className="text-txt2">{label}</strong>? All of its messages and files will be
+        removed for everyone. This can&apos;t be undone.
+      </div>
+      {error && <div className="mt-3 text-[13px] text-danger-text">{error}</div>}
+      <div className="mt-5 flex justify-end gap-2">
+        <DialogButton variant="secondary" onClick={close}>Cancel</DialogButton>
+        <DialogButton variant="danger" onClick={confirm}>Delete channel</DialogButton>
       </div>
     </Modal>
   );

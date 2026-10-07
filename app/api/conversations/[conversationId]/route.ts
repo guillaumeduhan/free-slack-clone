@@ -55,3 +55,10 @@ export const PATCH = route<P>(async (req, { conversationId }) => {
     ),
   );
 });
+
+/** Owner/admin: delete a channel and everything in it (#general can't be deleted). */
+export const DELETE = route<P>(async (req, { conversationId }) => {
+  const { db } = await requireUser(req);
+  await db((tx) => tx.exec('select delete_channel($1)', [conversationId]));
+  return ok({ deleted: conversationId });
+});

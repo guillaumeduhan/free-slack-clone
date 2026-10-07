@@ -10,17 +10,17 @@ Route handlers for every action in the Team Chat prototype. The only dependency 
 ```bash
 cp .env.example .env.local     # set DATABASE_URL and OWNER_EMAIL
 npm install
-npm run db:reset               # drop + migrate + seed (Northwind, demo teammates, owner invite)
+npm run db:reset               # drop + migrate + seed (workspace with #general only, owner invite)
 npm run dev                    # http://localhost:3002
-npm run smoke                  # end-to-end check of every endpoint (needs the dev server)
+npm run smoke                  # end-to-end check in a throwaway workspace, deleted afterwards (needs the dev server)
 ```
 
 Or from the repo root: `make setup` then `make dev`.
 
 To sign in:
-1. `POST /api/auth/otp { email }` with `OWNER_EMAIL` (or a demo teammate such as `marc@northwind.test`).
+1. `POST /api/auth/otp { email }` with `OWNER_EMAIL` (or anyone you invited).
 2. The 6-digit code is printed in the server log, and returned as `dev_code` outside production.
-3. `POST /api/auth/verify { email, token }`. The first sign-in makes `OWNER_EMAIL` the owner of Northwind.
+3. `POST /api/auth/verify { email, token }`. The first sign-in makes `OWNER_EMAIL` the owner of the workspace.
 
 ## UI
 
@@ -56,7 +56,7 @@ db/migrations/
   0002_rls_and_functions.sql     grants, RLS, SQL functions
   0003_invite_only.sql           is_email_allowed, claim invitations on first sign-in
   0004_realtime_files_sessions.sql  sign-in codes, sessions, file blobs, NOTIFY triggers
-db/seed.sql     Northwind workspace, channels, demo teammates and messages, owner invite
+db/seed.sql     WORKSPACE_NAME (default "Default Workspace") with #general, owner invite. No demo data
 scripts/        migrate.mjs (db:migrate / db:seed / db:reset) · smoke.mjs
 ```
 
@@ -109,7 +109,7 @@ scripts/        migrate.mjs (db:migrate / db:seed / db:reset) · smoke.mjs
 | GET | `/api/workspaces/:id/conversations?browse=1` | member | All public channels |
 | POST | `/api/workspaces/:id/conversations` | member | Create channel `{ name, private, topic }` |
 | POST | `/api/workspaces/:id/dms` | member | Find or open a DM / group DM `{ user_ids }` |
-| GET · PATCH | `/api/conversations/:id` | reader · member | Detail + member count · topic/rename/archive |
+| GET · PATCH · DELETE | `/api/conversations/:id` | reader · member · admin | Detail + member count · topic/rename/archive · delete channel (not #general) |
 | GET · POST · DELETE | `/api/conversations/:id/members` | reader · member · self/admin | List · add `{ user_ids }` or `{ join: true }` · leave/remove |
 | POST | `/api/conversations/:id/read` | member | `{ message_id }`, moves the read marker |
 | PUT · DELETE | `/api/conversations/:id/draft` | me | Save/clear composer text (`parent_id` for threads) |

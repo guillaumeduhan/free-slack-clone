@@ -1,6 +1,6 @@
 // Applies db/migrations/*.sql in order (once each), then optionally db/seed.sql.
 //   node scripts/migrate.mjs            migrate
-//   node scripts/migrate.mjs --seed     migrate + seed (OWNER_EMAIL is invited as owner)
+//   node scripts/migrate.mjs --seed     migrate + seed (WORKSPACE_NAME with #general, OWNER_EMAIL invited as owner)
 //   node scripts/migrate.mjs --reset    drop the "chat" schema first
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +39,8 @@ try {
 
   if (args.has('--seed')) {
     const owner = (process.env.OWNER_EMAIL ?? '').trim().toLowerCase();
-    await client.query(`select set_config('chat.seed_owner_email', $1, false)`, [owner]);
+    const workspace = (process.env.WORKSPACE_NAME ?? 'Default Workspace').trim() || 'Default Workspace';
+    await client.query(`select set_config('chat.seed_owner_email', $1, false), set_config('chat.seed_workspace', $2, false)`, [owner, workspace]);
     await client.query(readFileSync(join(root, 'db/seed.sql'), 'utf8'));
     console.log(`✓ seed${owner ? ` (owner invite: ${owner})` : ' (no OWNER_EMAIL, owner not invited)'}`);
   }

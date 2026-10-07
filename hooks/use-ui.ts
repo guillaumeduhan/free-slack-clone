@@ -14,6 +14,7 @@ export type Section = 'channels' | 'dms';
 
 export type CtxMenu =
   | { section: 'msg'; messageId: number; conversationId: string; x: number; y: number }
+  | { section: 'channel'; conversationId: string; x: number; y: number }
   | { section: 'ws' | 'channels' | 'dms'; x: number; y: number };
 
 export type HoverCard = { userId: string; left: number; top: number };
@@ -37,6 +38,8 @@ type UiState = {
   hoverCard: HoverCard | null;
   lightbox: Lightbox | null;
   deleteTarget: number | null;
+  /** Channel waiting for delete confirmation. */
+  deleteChannel: string | null;
   picker: Picker | null;
   mobilePane: 'list' | 'chat';
   collapsed: Record<string, boolean>;
@@ -74,6 +77,7 @@ export const useUi = create<UiState>((set) => ({
   hoverCard: null,
   lightbox: null,
   deleteTarget: null,
+  deleteChannel: null,
   picker: null,
   mobilePane: 'list',
   collapsed: {},

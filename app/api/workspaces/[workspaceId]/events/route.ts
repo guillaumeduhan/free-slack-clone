@@ -33,7 +33,8 @@ export const GET = route<P>(async (req, { workspaceId }) => {
         const membership = e.table === 'conversation_members';
         if (membership && e.conversation_id) readable.delete(e.conversation_id);
         // My own joins/leaves always go through so the sidebar can update (even after leaving).
-        const aboutMe = membership && e.user_id === uid;
+        // A deleted channel can't be checked any more: everyone refreshes their sidebar.
+        const aboutMe = (membership && e.user_id === uid) || (e.table === 'conversations' && e.op === 'delete');
         if (e.conversation_id && !aboutMe && !(await canRead(e.conversation_id).catch(() => false))) return;
         send(`event: change\ndata: ${JSON.stringify(e)}\n\n`);
       };
