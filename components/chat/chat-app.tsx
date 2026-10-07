@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SWRConfig } from 'swr';
-import { ApiError } from '@/lib/client/api';
+import { api, ApiError } from '@/lib/client/api';
 import { useUi } from '@/hooks/use-ui';
 import { useMe, useRealtime, useSidebar, useWorkspaces } from '@/hooks/use-chat-data';
 import { useViewport } from '@/hooks/use-viewport';
@@ -44,6 +44,12 @@ function Shell() {
   const ui = useUi();
   const { mobile, desktop } = useViewport();
   useRealtime();
+
+  // New accounts default to UTC: adopt the browser's timezone for "local time".
+  useEffect(() => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (me && me.timezone === 'UTC' && tz && tz !== 'UTC') api('PATCH', '/api/me', { timezone: tz }).catch(() => {});
+  }, [me]);
 
   // Pick the workspace (last used, else first).
   useEffect(() => {

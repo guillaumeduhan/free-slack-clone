@@ -22,6 +22,13 @@ To sign in:
 2. The 6-digit code is printed in the server log, and returned as `dev_code` outside production.
 3. `POST /api/auth/verify { email, token }`. The first sign-in makes `OWNER_EMAIL` the owner of Northwind.
 
+## UI
+
+- `/login` is ported from `Login.dc.html` and `/` from `Team Chat.dc.html` (the Claude Design files at the repo root, left untouched).
+- `components/chat/*`: one file per area (rail, sidebar, channel view, message, composer, thread, dialogs, settings, feeds, apps, overlays).
+- `hooks/use-chat-data.ts` fetches API data with SWR and revalidates it from the SSE stream. `hooks/use-ui.ts` (zustand) holds what's open or selected.
+- Design tokens are CSS variables in `app/globals.css`, exposed as Tailwind colors, in dark and light.
+
 ## How it works without Supabase
 
 | Supabase piece | Replacement |

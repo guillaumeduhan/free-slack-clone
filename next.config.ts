@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // The dev indicator sits bottom-left, on top of the rail's profile avatar.
+  devIndicators: false,
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
