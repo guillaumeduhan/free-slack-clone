@@ -53,7 +53,8 @@ export const GET = route<P>(async (req, { workspaceId }) => {
 
   return new Response(stream, {
     headers: {
-      'content-type': 'text/event-stream; charset=utf-8',
+      // Exactly this value: tunnels (cloudflared) only stream event-streams they recognise.
+      'content-type': 'text/event-stream',
       'cache-control': 'no-cache, no-transform',
       connection: 'keep-alive',
       'x-accel-buffering': 'no',

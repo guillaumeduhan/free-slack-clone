@@ -118,9 +118,14 @@ export function useSearch(q: string) {
 export const useConvMembers = (id: string | null) =>
   useSWR<{ joined_at: string; user: User }[]>(id ? keys.convMembers(id) : null, fetcher, opts);
 
+const SSE_GRACE_MS = 5000;
+const POLL_MS = 2000;
+
 /**
  * Live updates: one EventSource per workspace. Each change revalidates the
  * SWR keys it affects; the UI re-renders from fresh API data.
+ * Some proxies (e.g. free Cloudflare tunnels) hold streamed responses back: if the
+ * stream hasn't said "ready" after 5s, poll what's on screen every 2s until it does.
  */
 export function useRealtime() {
   const ws = useUi((s) => s.workspaceId);
@@ -139,7 +144,23 @@ export function useRealtime() {
       prefixes.forEach((p) => pending.add(p));
       timer ??= setTimeout(flush, 120);
     };
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      poll ??= setInterval(() => {
+        const { conversationId, threadId } = useUi.getState();
+        touch(keys.sidebar(ws), `/api/me/feed?workspace_id=${ws}`);
+        if (conversationId) touch(`/api/conversations/${conversationId}`);
+        if (threadId) touch(keys.thread(threadId));
+      }, POLL_MS);
+    };
+    const fallback = setTimeout(startPolling, SSE_GRACE_MS);
+
     const es = new EventSource(`/api/workspaces/${ws}/events`);
+    es.addEventListener('ready', () => {
+      clearTimeout(fallback);
+      if (poll) clearInterval(poll);
+      poll = null;
+    });
     es.addEventListener('change', (ev) => {
       const e = JSON.parse((ev as MessageEvent).data) as {
         table: string; conversation_id: string | null; message_id: number | null; parent_id: number | null;
@@ -155,6 +176,8 @@ export function useRealtime() {
     const beat = setInterval(() => { mutate(keys.me); mutate(keys.members(ws)); }, 60_000);
     return () => {
       es.close();
+      clearTimeout(fallback);
+      if (poll) clearInterval(poll);
       clearInterval(beat);
       if (timer) clearTimeout(timer);
     };
