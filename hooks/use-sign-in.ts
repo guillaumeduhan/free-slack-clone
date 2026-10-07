@@ -47,6 +47,21 @@ export function useSignIn(inviteToken: string | null, onSignedIn: () => void) {
 
   const fail = useCallback(() => setShake((n) => n + 1), []);
 
+  const finish = useCallback((name: string, returning: boolean, workspace: string) => {
+    setWelcome({ name, returning, workspace });
+    setStep('done');
+    setTimeout(onSignedIn, 900);
+  }, [onSignedIn]);
+
+  /** Profile step for new people, otherwise straight in. */
+  const signedIn = useCallback(async (res: VerifyResult) => {
+    const workspace = res.workspaces[0]?.workspace.name ?? 'your workspace';
+    setWelcome((w) => ({ ...w, workspace }));
+    if (res.needs_profile) return setStep('join');
+    const me = await api<{ display_name: string }>('GET', '/api/me');
+    finish(me.display_name, true, workspace);
+  }, [finish]);
+
   const sendCode = useCallback(async (address: string) => {
     const value = address.trim().toLowerCase();
     setDenied(null);
@@ -58,6 +73,11 @@ export function useSignIn(inviteToken: string | null, onSignedIn: () => void) {
     setEmail(value);
     setLoading(true);
     try {
+      // Invitation links sign in directly: the link itself proves access to the inbox.
+      if (inviteToken && invitation?.email === value) {
+        await signedIn(await api<VerifyResult>('POST', '/api/auth/invite', { token: inviteToken }));
+        return;
+      }
       const res = await api<{ dev_code?: string }>('POST', '/api/auth/otp', { email: value });
       setDevCode(res.dev_code ?? null);
       setCodeError('');
@@ -71,13 +91,7 @@ export function useSignIn(inviteToken: string | null, onSignedIn: () => void) {
     } finally {
       setLoading(false);
     }
-  }, [fail]);
-
-  const finish = useCallback((name: string, returning: boolean, workspace: string) => {
-    setWelcome({ name, returning, workspace });
-    setStep('done');
-    setTimeout(onSignedIn, 900);
-  }, [onSignedIn]);
+  }, [fail, inviteToken, invitation, signedIn]);
 
   const verify = useCallback(async (code: string) => {
     if (code.length < 6) {
@@ -87,15 +101,7 @@ export function useSignIn(inviteToken: string | null, onSignedIn: () => void) {
     setLoading(true);
     setCodeError('');
     try {
-      const res = await api<VerifyResult>('POST', '/api/auth/verify', { email, token: code });
-      const workspace = res.workspaces[0]?.workspace.name ?? 'your workspace';
-      setWelcome((w) => ({ ...w, workspace }));
-      if (res.needs_profile) {
-        setStep('join');
-      } else {
-        const me = await api<{ display_name: string }>('GET', '/api/me');
-        finish(me.display_name, true, workspace);
-      }
+      await signedIn(await api<VerifyResult>('POST', '/api/auth/verify', { email, token: code }));
       return true;
     } catch (e) {
       setCodeError(e instanceof ApiError && e.code === 'no_access'
@@ -106,7 +112,7 @@ export function useSignIn(inviteToken: string | null, onSignedIn: () => void) {
     } finally {
       setLoading(false);
     }
-  }, [email, fail, finish]);
+  }, [email, fail, signedIn]);
 
   const saveProfile = useCallback(async (displayName: string, title: string) => {
     if (!displayName.trim()) return fail();

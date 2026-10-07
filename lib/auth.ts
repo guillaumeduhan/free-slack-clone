@@ -80,3 +80,21 @@ export async function requireConversation(tx: Tx, conversationId: string) {
   if (!conv) throw new HttpError(404, 'Conversation not found', 'not_found');
   return conv;
 }
+
+/**
+ * True when the request comes from this machine or the local network (localhost,
+ * *.localhost, *.local, private IPs) and not through a public tunnel. Dev conveniences
+ * like showing the sign-in code are limited to these requests.
+ */
+export function isLocalRequest(req: Request) {
+  if (req.headers.get('cf-connecting-ip')) return false; // came through a Cloudflare tunnel
+  return isLocalHost(req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? '');
+}
+
+function isLocalHost(hostHeader: string) {
+  const host = hostHeader.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+  return (
+    host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host === '::1' ||
+    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  );
+}

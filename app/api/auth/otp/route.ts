@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { route, ok, body, HttpError } from '@/lib/http';
 import { asServer } from '@/lib/db';
-import { sha256 } from '@/lib/auth';
+import { isLocalRequest, sha256 } from '@/lib/auth';
 
 const CODE_TTL_MINUTES = 10;
 
@@ -11,7 +11,8 @@ const CODE_TTL_MINUTES = 10;
  * so uninvited addresses get a clear 403.
  *
  * Email delivery isn't wired yet: the code is printed in the server log, and
- * returned as `dev_code` outside production so the login screen can show it.
+ * returned as `dev_code` outside production, only for local requests (never through
+ * a public tunnel, or anyone knowing a member's email could sign in).
  */
 export const POST = route(async (req) => {
   const { email } = await body(req, z.object({ email: z.string().trim().toLowerCase().email() }));
@@ -33,5 +34,5 @@ export const POST = route(async (req) => {
   });
 
   console.log(`[auth] sign-in code for ${email}: ${code}`);
-  return ok({ sent: true, ...(process.env.NODE_ENV !== 'production' ? { dev_code: code } : {}) });
+  return ok({ sent: true, ...(process.env.NODE_ENV !== 'production' && isLocalRequest(req) ? { dev_code: code } : {}) });
 });
