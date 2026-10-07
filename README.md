@@ -1,57 +1,56 @@
-# Team Chat API · Next.js 15 + Supabase
+# Team Chat API · Next.js 16 + PostgreSQL
 
-Route handlers for every action in the Team Chat prototype, built on `supabase/migrations/0001_schema.sql`.
+Route handlers for every action in the Team Chat prototype. The only dependency is a PostgreSQL 15+ connection pool (`DATABASE_URL`): no Supabase, no storage bucket, no external auth.
 
-- **Business rules live in Postgres:** row-level security and RPC functions in `0002_supabase_rls_and_functions.sql` enforce them.
-- **Handlers stay thin:** they validate input with zod, call Supabase as the signed-in user, and shape the JSON.
+- **Business rules live in Postgres:** row-level security and SQL functions in `db/migrations/` enforce them. Everything lives in the `chat` schema.
+- **Handlers stay thin:** they validate input with zod, run SQL as the signed-in user, and shape the JSON.
 
 ## Quick start
 
 ```bash
-chmod +x setup.sh
-OWNER_EMAIL=you@company.com ./setup.sh local     # Supabase in Docker
-# or
-OWNER_EMAIL=you@company.com SUPABASE_PROJECT_REF=abcd1234 ./setup.sh remote
+cp .env.example .env.local     # set DATABASE_URL and OWNER_EMAIL
+npm install
+npm run db:reset               # drop + migrate + seed (Northwind, demo teammates, owner invite)
+npm run dev                    # http://localhost:3002
+npm run smoke                  # end-to-end check of every endpoint (needs the dev server)
 ```
 
-`setup.sh` runs these steps in order:
-1. Checks Node 20+, psql, and (local only) Docker.
-2. Creates the Next.js app (TypeScript, Tailwind, App Router) and copies these files into it.
-3. Installs shadcn/ui and its components.
-4. Starts or links Supabase, then applies the 3 migrations.
-5. Runs `supabase/bootstrap.sql`: creates the Northwind workspace and its channels, and invites `OWNER_EMAIL`.
-6. Writes `.env.local` and generates TypeScript types.
-7. Starts `npm run dev`.
+Or from the repo root: `make setup` then `make dev`.
 
 To sign in:
-1. Open `http://localhost:3000/login` and enter your email.
-2. Locally, the code arrives at `http://127.0.0.1:54324`.
-3. The first sign-in makes you the owner of Northwind.
+1. `POST /api/auth/otp { email }` with `OWNER_EMAIL` (or a demo teammate such as `marc@northwind.test`).
+2. The 6-digit code is printed in the server log, and returned as `dev_code` outside production.
+3. `POST /api/auth/verify { email, token }`. The first sign-in makes `OWNER_EMAIL` the owner of Northwind.
 
-## Manual setup
+## How it works without Supabase
 
-```bash
-npm i @supabase/supabase-js @supabase/ssr zod
-cp .env.example .env.local          # fill in URL, anon key, service role key
-supabase db push                    # or run both migrations in the SQL editor
-```
-
-Then in the Supabase dashboard, open **Project Settings → API → Exposed schemas** and add `teamchat`.
-
-Optionally generate types: `supabase gen types typescript --schema teamchat > lib/database.types.ts`.
+| Supabase piece | Replacement |
+|---|---|
+| `auth.uid()` + JWT | `chat.uid()` reads `chat.uid`, set per transaction. Each request runs `set local role chat_user` so RLS applies (`lib/db.ts` `asUser`) |
+| `service_role` client | `asServer`: the pool's login role, which owns the tables and bypasses RLS. Used for auth, bot API, webhooks |
+| Supabase Auth (email OTP) | `chat.sign_in_codes` (hashed, 10 min, 5 attempts) and `chat.sessions` (hashed opaque tokens, 30 days) |
+| Storage bucket | `chat.file_blobs` (bytea, 50 MB max), served by `/api/files/:id/content` |
+| Realtime | `pg_notify('chat', …)` triggers, one shared `LISTEN chat` connection, SSE per workspace |
 
 ## Layout
 
 ```
 lib/
-  supabase.ts   userClient (RLS, cookie or Bearer JWT) · adminClient (service role)
+  db.ts         pool · asUser (RLS) · asServer · many/maybe/exec helpers
   http.ts       route() wrapper, ok(), body()/query() zod parsing, Postgres → HTTP errors
-  auth.ts       requireUser · requireRole · requireConversation
-  messages.ts   MESSAGE_SELECT, reaction summaries, signed file URLs
+  auth.ts       sessions · requireUser · requireRole · requireConversation
+  messages.ts   MESSAGE_JSON (one SQL json object per message), reaction summaries
+  realtime.ts   LISTEN/NOTIFY hub
+proxy.ts        fast session gate (Next 16 replacement for middleware.ts)
 app/api/…       one route.ts per resource (below)
-supabase/migrations/
-  0001_schema.sql                     tables, enums, indexes, triggers
-  0002_supabase_rls_and_functions.sql grants, RLS, RPCs, realtime, storage bucket
+db/migrations/
+  0000_roles.sql                 chat schema, chat_user role, chat.uid()
+  0001_schema.sql                tables, enums, indexes, triggers
+  0002_rls_and_functions.sql     grants, RLS, SQL functions
+  0003_invite_only.sql           is_email_allowed, claim invitations on first sign-in
+  0004_realtime_files_sessions.sql  sign-in codes, sessions, file blobs, NOTIFY triggers
+db/seed.sql     Northwind workspace, channels, demo teammates and messages, owner invite
+scripts/        migrate.mjs (db:migrate / db:seed / db:reset) · smoke.mjs
 ```
 
 ## Conventions
@@ -68,8 +67,8 @@ supabase/migrations/
 - `422` invalid_request / invalid_value
 
 **Auth**
-- Browser clients use the Supabase session cookie.
-- Native clients send `Authorization: Bearer <supabase JWT>`.
+- Browser clients use the `tc_session` cookie (HttpOnly, set by `/api/auth/verify`).
+- Native clients send `Authorization: Bearer tcs_…` (the `token` returned by `/api/auth/verify`).
 - Bots send `Bearer xoxb-…`, but only to `/api/bot/*`.
 
 **IDs**
@@ -120,7 +119,9 @@ supabase/migrations/
 | PUT · DELETE | `/api/messages/:id/save` | reader | Save for later |
 | GET | `/api/me/feed?workspace_id=&kind=` | member | `mentions` · `threads` · `activity` · `saved` · `drafts` |
 | GET | `/api/workspaces/:id/search?q=` | member | People, channels, messages (full-text) |
-| POST | `/api/workspaces/:id/files` | member | Register an upload → signed upload URL |
+| POST | `/api/workspaces/:id/files` | member | Register an upload → `upload.url` |
+| PUT · GET | `/api/files/:id/content` | uploader · member | Upload the bytes (once) · download |
+| GET | `/api/workspaces/:id/events` | member | Server-Sent Events stream of changes |
 
 \* Posting in a public channel joins it automatically.
 
@@ -146,22 +147,23 @@ supabase/migrations/
 
 ```ts
 const { data } = await api.post(`/api/workspaces/${ws}/files`, { name, mime_type, size_bytes });
-await supabase.storage.from('files').uploadToSignedUrl(data.upload.path, data.upload.token, blob);
+await fetch(data.upload.url, { method: 'PUT', body: blob });
 await api.post(`/api/conversations/${conv}/messages`, { text, file_ids: [data.file.id] });
 ```
 
-Files are private. Message payloads include one-hour signed URLs.
+Files are private: `files[].url` requires a session in the file's workspace. Only images, video, audio and PDF render inline; anything else downloads.
 
 **Realtime**
 
-`messages`, `reactions` and `conversation_members` are published. RLS applies, so clients only receive rows they can read.
-
 ```ts
-supabase
-  .channel(`conv:${id}`)
-  .on('postgres_changes', { event: '*', schema: 'teamchat', table: 'messages', filter: `conversation_id=eq.${id}` }, onChange)
-  .subscribe();
+const es = new EventSource(`/api/workspaces/${ws}/events`);
+es.addEventListener('change', (e) => {
+  const { table, op, conversation_id, message_id, parent_id } = JSON.parse(e.data);
+  // refetch the timeline / thread / sidebar that changed
+});
 ```
+
+Changes on `messages`, `reactions`, `conversation_members` and `conversations` are streamed. Events about conversations the viewer can't read are dropped (checked with RLS).
 
 ## Rules enforced in the database
 
@@ -174,36 +176,23 @@ supabase
 
 ## Invite-only sign-in
 
-Nobody can create an account or reach the app without an invitation. Four layers enforce this.
+Nobody can create an account or reach the app without an invitation.
 
-**1. Supabase Auth hook** (`0003_invite_only_auth.sql`)
-- `public.teamchat_before_user_created` rejects any new auth user whose email has no pending invitation and no active membership.
-- This covers email codes, magic links, Google, and direct calls to the Supabase API.
-- Enable it in **Authentication → Hooks → Before User Created**.
-
-**2. Pre-check before sending a code**
-- `POST /api/auth/otp` checks the invite list before Supabase sends anything.
-- Uninvited emails get a `403 not_invited` and never receive an email.
-
-**3. Membership check after sign-in**
-- `POST /api/auth/verify` (email code) and `GET /auth/callback` (Google) sign the user out again if they have no active membership.
-- This catches people who were removed from the workspace.
-
-**4. `middleware.ts`**
-- Every page and `/api/*` route needs a session plus at least one active membership.
-- Public routes: `/login`, `/invite/*`, `/auth/*`, `/api/auth/*`, and the bot and webhook endpoints, which have their own secrets.
-
-Invitations are claimed automatically on first sign-in (`claim_invitations` trigger), so invited people don't need the link.
+1. `POST /api/auth/otp` only issues a code when `is_email_allowed()` finds a pending invitation or an active membership. Others get `403 not_invited`.
+2. `POST /api/auth/verify` creates the user on first sign-in; pending invitations are claimed (`claim_pending_invitations`). No active membership → `403 no_access`, no session.
+3. `requireUser` checks the session and an active membership on every request, so removed people lose access immediately.
+4. `proxy.ts` rejects requests without a session cookie or Bearer token. Public: `/login`, `/invite/*`, `/api/auth/*`, and the bot and webhook endpoints, which have their own secrets.
 
 | Method | Path | What |
 |---|---|---|
-| POST | `/api/auth/otp` | `{ email }` → sends a 6-digit code if invited, else `403 not_invited` |
-| POST | `/api/auth/verify` | `{ email, token }` → session cookie + `needs_profile` |
-| GET | `/auth/callback` | OAuth return URL (set it as the Supabase redirect URL) |
+| POST | `/api/auth/otp` | `{ email }` → issues a 6-digit code if invited, else `403 not_invited` |
+| POST | `/api/auth/verify` | `{ email, token }` → session cookie + `token` + `needs_profile` |
+| POST | `/api/auth/logout` | Ends the session |
 
 ## Not included
 
-- Rate limiting
-- Email sending for invitations
+- Rate limiting (beyond one code per email every 20 s and 5 attempts per code)
+- Email sending (sign-in codes and invitations are logged, not emailed)
+- Google sign-in
 - Push notifications
 - Message edit history

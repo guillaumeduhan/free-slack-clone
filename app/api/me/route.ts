@@ -1,15 +1,22 @@
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
-import { route, ok, body, db } from '@/lib/http';
+import { route, ok, body, found } from '@/lib/http';
 
 /** My profile and the workspaces I belong to. */
 export const GET = route(async (req) => {
-  const { sb, uid } = await requireUser(req);
-  const [me, memberships] = await Promise.all([
-    sb.from('users').select('*').eq('id', uid).single(),
-    sb.from('workspace_members').select('role, workspace:workspaces(id, name, slug, logo_url)').eq('user_id', uid).is('deactivated_at', null),
-  ]);
-  return ok({ ...db(me), workspaces: db(memberships) });
+  const { uid, db } = await requireUser(req);
+  return ok(
+    await db(async (tx) => {
+      const me = found(await tx.maybe('select * from users where id = $1', [uid]));
+      const workspaces = await tx.many(
+        `select wm.role, json_build_object('id', w.id, 'name', w.name, 'slug', w.slug, 'logo_url', w.logo_url) as workspace
+           from workspace_members wm join workspaces w on w.id = wm.workspace_id
+          where wm.user_id = $1 and wm.deactivated_at is null order by w.name`,
+        [uid],
+      );
+      return { ...me, workspaces };
+    }),
+  );
 });
 
 const Patch = z
@@ -24,8 +31,23 @@ const Patch = z
   .partial()
   .strict();
 
+const NULLABLE = ['title', 'avatar_url', 'status_text', 'status_emoji'] as const;
+
 export const PATCH = route(async (req) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const patch = await body(req, Patch);
-  return ok(db(await sb.from('users').update(patch).eq('id', uid).select().single()));
+  const sets: string[] = [];
+  const params: unknown[] = [uid];
+  for (const key of ['display_name', 'timezone', ...NULLABLE] as const) {
+    if (!(key in patch)) continue;
+    params.push(patch[key] ?? null);
+    sets.push(`${key} = $${params.length}`);
+  }
+  return ok(
+    await db(async (tx) =>
+      sets.length
+        ? found(await tx.maybe(`update users set ${sets.join(', ')} where id = $1 returning *`, params))
+        : found(await tx.maybe('select * from users where id = $1', [uid])),
+    ),
+  );
 });

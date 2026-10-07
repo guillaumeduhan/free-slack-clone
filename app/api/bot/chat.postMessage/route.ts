@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminClient } from '@/lib/supabase';
+import { asServer } from '@/lib/db';
 
 /**
  * Bot API, Slack-compatible shape.
@@ -27,13 +27,19 @@ export async function POST(req: Request) {
   if (!parsed.success) return fail(422, 'invalid_arguments', { issues: parsed.error.issues });
   const { channel, text, thread_ts } = parsed.data;
 
-  const { data, error } = await adminClient().rpc('bot_post_message', {
-    p_token: token,
-    p_channel: channel,
-    p_text: text,
-    p_thread: thread_ts == null ? null : Number(thread_ts),
-  });
-  if (error) return fail(ERR[error.code ?? ''] ?? 500, ERR[error.code ?? ''] ? error.message : 'internal_error');
+  let data: { id: number; conversation_id: string; user_id: string; body: string; parent_id: number | null };
+  try {
+    data = (await asServer((tx) =>
+      tx.maybe<typeof data>('select * from bot_post_message($1, $2, $3, $4)', [
+        token, channel, text, thread_ts == null ? null : Number(thread_ts),
+      ]),
+    ))!;
+  } catch (e) {
+    const { code, message } = e as { code?: string; message: string };
+    const status = ERR[code ?? ''];
+    if (!status) console.error(e);
+    return fail(status ?? 500, status ? message : 'internal_error');
+  }
 
   const ts = String(data.id);
   return NextResponse.json({

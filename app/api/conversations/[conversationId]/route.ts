@@ -1,17 +1,26 @@
 import { z } from 'zod';
 import { requireUser, requireConversation } from '@/lib/auth';
-import { route, ok, body, db } from '@/lib/http';
+import { route, ok, body, found } from '@/lib/http';
 
 type P = { conversationId: string };
 
 export const GET = route<P>(async (req, { conversationId }) => {
-  const { sb, uid } = await requireUser(req);
-  const conv = await requireConversation(sb, conversationId);
-  const [{ count }, { data: me }] = await Promise.all([
-    sb.from('conversation_members').select('*', { count: 'exact', head: true }).eq('conversation_id', conversationId),
-    sb.from('conversation_members').select('last_read_message_id, muted, starred, notify_level').eq('conversation_id', conversationId).eq('user_id', uid).maybeSingle(),
-  ]);
-  return ok({ ...conv, member_count: count ?? 0, membership: me });
+  const { uid, db } = await requireUser(req);
+  return ok(
+    await db(async (tx) => {
+      const conv = await requireConversation(tx, conversationId);
+      const counts = await tx.maybe<{ member_count: number }>(
+        'select count(*) as member_count from conversation_members where conversation_id = $1',
+        [conversationId],
+      );
+      const membership = await tx.maybe(
+        `select last_read_message_id, muted, starred, notify_level from conversation_members
+          where conversation_id = $1 and user_id = $2`,
+        [conversationId, uid],
+      );
+      return { ...conv, member_count: counts?.member_count ?? 0, membership };
+    }),
+  );
 });
 
 const Patch = z
@@ -26,8 +35,23 @@ const Patch = z
 
 /** Members can rename (channels only), set topic, archive. */
 export const PATCH = route<P>(async (req, { conversationId }) => {
-  const { sb } = await requireUser(req);
-  const { archived, ...rest } = await body(req, Patch);
-  const patch = { ...rest, ...(archived === undefined ? {} : { archived_at: archived ? new Date().toISOString() : null }) };
-  return ok(db(await sb.from('conversations').update(patch).eq('id', conversationId).select().single()));
+  const { db } = await requireUser(req);
+  const p = await body(req, Patch);
+  return ok(
+    await db(async (tx) =>
+      found(
+        await tx.maybe(
+          `update conversations set
+                  name = coalesce($2, name),
+                  topic = case when $3::boolean then $4 else topic end,
+                  description = case when $5::boolean then $6 else description end,
+                  archived_at = case when $7::boolean is null then archived_at when $7 then now() else null end
+            where id = $1 returning *`,
+          [conversationId, p.name ?? null, 'topic' in p, p.topic ?? null,
+           'description' in p, p.description ?? null, p.archived ?? null],
+        ),
+        'Conversation not found',
+      ),
+    ),
+  );
 });

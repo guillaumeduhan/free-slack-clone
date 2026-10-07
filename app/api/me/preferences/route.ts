@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { requireUser, requireRole } from '@/lib/auth';
-import { route, ok, body, query, db, uuid } from '@/lib/http';
+import { route, ok, body, query, uuid } from '@/lib/http';
 
 const Q = z.object({ workspace_id: uuid });
 
@@ -17,11 +17,15 @@ const DEFAULTS = {
 
 /** Theme, notifications, do not disturb: ?workspace_id=… */
 export const GET = route(async (req) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const { workspace_id } = query(req, Q);
-  await requireRole(sb, workspace_id, uid);
-  const { data } = await sb.from('user_preferences').select('*').eq('user_id', uid).eq('workspace_id', workspace_id).maybeSingle();
-  return ok(data ?? { user_id: uid, workspace_id, ...DEFAULTS });
+  return ok(
+    await db(async (tx) => {
+      await requireRole(tx, workspace_id, uid);
+      const row = await tx.maybe('select * from user_preferences where user_id = $1 and workspace_id = $2', [uid, workspace_id]);
+      return row ?? { user_id: uid, workspace_id, ...DEFAULTS };
+    }),
+  );
 });
 
 const time = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/);
@@ -39,17 +43,19 @@ const Put = z
   .partial()
   .strict();
 
+const COLUMNS = Object.keys(DEFAULTS) as (keyof typeof DEFAULTS)[];
+
 export const PUT = route(async (req) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const { workspace_id } = query(req, Q);
   const prefs = await body(req, Put);
-  return ok(
-    db(
-      await sb
-        .from('user_preferences')
-        .upsert({ user_id: uid, workspace_id, ...prefs }, { onConflict: 'user_id,workspace_id' })
-        .select()
-        .single(),
-    ),
-  );
+  const keys = COLUMNS.filter((k) => k in prefs);
+  const values = keys.map((k) => prefs[k] ?? null);
+  const cols = ['user_id', 'workspace_id', ...keys];
+  const sql = `insert into user_preferences (${cols.join(', ')})
+               values (${cols.map((_, i) => `$${i + 1}`).join(', ')})
+               on conflict (user_id, workspace_id) do update set
+                 ${keys.length ? keys.map((k) => `${k} = excluded.${k}`).join(', ') : 'theme = user_preferences.theme'}
+               returning *`;
+  return ok(await db((tx) => tx.maybe(sql, [uid, workspace_id, ...values])));
 });
