@@ -1,8 +1,16 @@
+import { Suspense } from 'react';
+import { LoginScreen } from '@/components/auth/login-screen';
+
+const DEMO_ACCOUNTS =
+  process.env.NODE_ENV === 'production'
+    ? []
+    : [process.env.OWNER_EMAIL, 'sarah@northwind.test', 'marc@northwind.test', 'aisha@northwind.test', 'leo@northwind.test']
+        .filter((e): e is string => !!e);
+
 export default function LoginPage() {
   return (
-    <main style={{ fontFamily: 'system-ui', padding: 32 }}>
-      <h1>Team Chat</h1>
-      <p>The API is running. The chat UI is the next step.</p>
-    </main>
+    <Suspense fallback={<div className="min-h-screen bg-rail" />}>
+      <LoginScreen demoAccounts={DEMO_ACCOUNTS} />
+    </Suspense>
   );
 }
