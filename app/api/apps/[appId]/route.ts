@@ -21,7 +21,12 @@ export const GET = route<P>(async (req, { appId }) => {
                      from app_tokens t where t.app_id = a.id) as tokens,
                   (select coalesce(json_agg(json_build_object('id', w.id, 'conversation_id', w.conversation_id,
                             'created_at', w.created_at, 'disabled_at', w.disabled_at)), '[]')
-                     from webhooks w where w.app_id = a.id) as webhooks
+                     from webhooks w where w.app_id = a.id) as webhooks,
+                  (select coalesce(json_agg(r order by r.id desc), '[]') from (
+                     select m.id, m.body, m.created_at, m.conversation_id, c.name as conversation_name
+                       from messages m join conversations c on c.id = m.conversation_id
+                      where m.user_id = a.bot_user_id and m.deleted_at is null
+                      order by m.id desc limit 6) r) as recent
              from apps a
              join users u on u.id = a.bot_user_id
              left join conversations c on c.id = a.default_conversation_id

@@ -5,11 +5,12 @@ import type { Tx } from './db';
  * Runs under RLS, so embeds only include rows the caller can read.
  */
 export const MESSAGE_JSON = `json_build_object(
-  'id', m.id, 'conversation_id', m.conversation_id, 'parent_id', m.parent_id, 'body', m.body,
+  'id', m.id, 'conversation_id', m.conversation_id, 'parent_id', m.parent_id, 'user_id', m.user_id, 'body', m.body,
   'reply_count', m.reply_count, 'last_reply_at', m.last_reply_at, 'also_sent_to_channel', m.also_sent_to_channel,
   'edited_at', m.edited_at, 'deleted_at', m.deleted_at, 'created_at', m.created_at,
   'author', (select json_build_object('id', u.id, 'display_name', u.display_name, 'avatar_url', u.avatar_url, 'is_bot', u.is_bot)
                from users u where u.id = m.user_id),
+  'saved', exists (select 1 from saved_items s where s.message_id = m.id and s.user_id = chat.uid()),
   'reply_users', (select coalesce(json_agg(x.user_id), '[]') from (
                     select r.user_id from messages r where r.parent_id = m.id and r.deleted_at is null
                      group by r.user_id order by max(r.id) desc limit 5) x),
