@@ -10,6 +10,15 @@ Channels, threads, DMs, reactions, mentions, files, search, bots and webhooks, o
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-RLS-4169e1?logo=postgresql&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwindcss&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)
+[![CI](https://github.com/guillaumeduhan/free-slack-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/guillaumeduhan/free-slack-clone/actions/workflows/ci.yml)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+<br/>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="Slack clone: the #general channel with reactions, a thread, mentions and the sidebar" src="docs/screenshot-light.png">
+</picture>
 
 </div>
 
@@ -18,7 +27,7 @@ Channels, threads, DMs, reactions, mentions, files, search, bots and webhooks, o
 ## ⚡ Quick start
 
 ```bash
-git clone https://github.com/guillaumeduhan/slack-clone.git && cd slack-clone && make
+git clone https://github.com/guillaumeduhan/free-slack-clone.git && cd free-slack-clone && make
 ```
 
 That's it. Open **http://localhost:3002** and sign in as `owner@example.com`. In dev, the 6-digit code shows up right on the login screen.
@@ -93,3 +102,7 @@ scripts/          dev.mjs (one-command start), migrate.mjs, smoke.mjs, lan.mjs
 ## 🚧 Not included (yet)
 
 Email delivery (codes and invites are logged), Google sign-in, push notifications, message edit history, rate limiting beyond sign-in codes.
+
+## 📄 License
+
+[MIT](LICENSE)

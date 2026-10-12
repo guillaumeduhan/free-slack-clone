@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # The same one command as locally: embedded Postgres + migrations + seed + app.
+      - name: Start the app
+        run: |
+          npm run dev > dev.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3002/login && exit 0; sleep 2; done
+          cat dev.log; exit 1
+      - run: npm run smoke
+      - if: failure()
+        run: cat dev.log || true
