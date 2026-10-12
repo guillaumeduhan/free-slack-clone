@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* Design tokens from the Team Chat design. Dark is the default theme. */
+:root {
+  --rail: #16171a;
+  --bg: #1c1d21;
+  --hover: #25262b;
+  --sub: #202126;
+  --line2: #2c2d33;
+  --line: #33343a;
+  --line3: #4a4b53;
+  --mute2: #63646c;
+  --mute0: #80818a;
+  --mute: #a6a7ae;
+  --txt3: #d4d4d8;
+  --txt2: #e4e4e7;
+  --txt1: #f4f4f5;
+  --txt: #fafafa;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-text: #c4b5fd;
+  --accent-icon: #a78bfa;
+  --online: #2bac76;
+  --danger: #e5484d;
+  --danger-text: #ff6369;
+  --warn: #fbbf24;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --rail: #f1f1f3;
+  --bg: #ffffff;
+  --hover: #f1f1f3;
+  --sub: #f7f7f8;
+  --line2: #ececef;
+  --line: #e2e2e6;
+  --line3: #cfcfd5;
+  --mute2: #9a9aa3;
+  --mute0: #8a8a93;
+  --mute: #6b6b74;
+  --txt3: #3f3f46;
+  --txt2: #27272a;
+  --txt1: #18181b;
+  --txt: #09090b;
+  --accent-text: #6d28d9;
+  --accent-icon: #7c3aed;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-rail: var(--rail);
+  --color-bg: var(--bg);
+  --color-hover: var(--hover);
+  --color-sub: var(--sub);
+  --color-line2: var(--line2);
+  --color-line: var(--line);
+  --color-line3: var(--line3);
+  --color-mute2: var(--mute2);
+  --color-mute0: var(--mute0);
+  --color-mute: var(--mute);
+  --color-txt3: var(--txt3);
+  --color-txt2: var(--txt2);
+  --color-txt1: var(--txt1);
+  --color-txt: var(--txt);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-accent-icon: var(--accent-icon);
+  --color-online: var(--online);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-warn: var(--warn);
+  --font-sans: var(--font-lato), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --animate-shake: shake 0.4s both;
+
+  @keyframes shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+}
+
+/* The design uses the browser's default line-height, not Tailwind's 1.5. */
+html {
+  line-height: normal;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--txt);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }

@@ -20,6 +20,8 @@ export function route<P extends Record<string, string> = Record<string, never>>(
     } catch (e) {
       if (e instanceof HttpError) return errorJson(e.status, e.code, e.message);
       if (e instanceof ZodError) return errorJson(422, 'invalid_request', 'Request validation failed', { issues: e.issues });
+      const pg = fromPg(e);
+      if (pg) return errorJson(pg.status, pg.code, pg.message);
       console.error(e);
       return errorJson(500, 'internal', 'Something went wrong');
     }
@@ -38,12 +40,11 @@ export const query = <T>(req: Request, schema: ZodType<T>): T =>
 export const uuid = z.string().uuid();
 export const messageId = (v: string) => z.coerce.number().int().positive().parse(v);
 
-// Postgres / PostgREST error codes → HTTP. RPCs raise with these errcodes.
+// Postgres error codes → HTTP. SQL functions raise with these errcodes.
 const PG: Record<string, [number, string]> = {
   '28000': [401, 'unauthorized'],
   '42501': [403, 'forbidden'],
   P0002: [404, 'not_found'],
-  PGRST116: [404, 'not_found'],
   '23505': [409, 'conflict'],
   '23503': [422, 'invalid_reference'],
   '23514': [422, 'invalid_value'],
@@ -51,21 +52,17 @@ const PG: Record<string, [number, string]> = {
   '22P02': [422, 'invalid_value'],
 };
 
-type Res<T> = { data: T | null; error: { code?: string; message: string } | null };
-
-function raise(error: { code?: string; message: string }): never {
-  const [status, code] = PG[error.code ?? ''] ?? [500, 'database_error'];
-  throw new HttpError(status, error.message, code);
+/** Maps a pg error to an HttpError, or returns null for anything else. */
+export function fromPg(e: unknown): HttpError | null {
+  const code = (e as { code?: unknown })?.code;
+  if (typeof code !== 'string' || !(code in PG)) return null;
+  const [status, name] = PG[code];
+  // RLS rejections on insert/update are "permission denied" or "new row violates row-level security".
+  return new HttpError(status, (e as Error).message, name);
 }
 
-/** Unwraps a Supabase response; throws on error or missing row. */
-export function db<T>(res: Res<T>): NonNullable<T> {
-  if (res.error) raise(res.error);
-  if (res.data == null) throw new HttpError(404, 'Not found', 'not_found');
-  return res.data as NonNullable<T>;
-}
-
-/** Same as db() for calls that return nothing (void RPCs, deletes). */
-export function check(res: { error: { code?: string; message: string } | null }) {
-  if (res.error) raise(res.error);
+/** Throws 404 when a row is missing (RLS hides rows the caller can't read). */
+export function found<T>(row: T | null | undefined, what = 'Not found'): T {
+  if (row == null) throw new HttpError(404, what, 'not_found');
+  return row;
 }

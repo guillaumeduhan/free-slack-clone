@@ -1,17 +1,28 @@
 import { z } from 'zod';
 import { requireUser, requireRole } from '@/lib/auth';
-import { route, ok, body, db, uuid } from '@/lib/http';
+import { route, ok, body, uuid } from '@/lib/http';
 
 type P = { workspaceId: string };
 
-const APP_SELECT =
-  'id, kind, name, description, created_at, bot:users!apps_bot_user_id_fkey(id, display_name, avatar_url), default_conversation:conversations(id, name)';
-
 /** Apps, agents & bots installed in the workspace. */
 export const GET = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireRole(sb, workspaceId, uid);
-  return ok(db(await sb.from('apps').select(APP_SELECT).eq('workspace_id', workspaceId).order('name')));
+  const { uid, db } = await requireUser(req);
+  return ok(
+    await db(async (tx) => {
+      await requireRole(tx, workspaceId, uid);
+      return tx.many(
+        `select a.id, a.kind, a.name, a.description, a.created_at,
+                json_build_object('id', u.id, 'display_name', u.display_name, 'avatar_url', u.avatar_url) as bot,
+                case when c.id is null then null else json_build_object('id', c.id, 'name', c.name) end as default_conversation
+           from apps a
+           join users u on u.id = a.bot_user_id
+           left join conversations c on c.id = a.default_conversation_id
+          where a.workspace_id = $1
+          order by a.name`,
+        [workspaceId],
+      );
+    }),
+  );
 });
 
 const Create = z.object({
@@ -26,17 +37,15 @@ const Create = z.object({
  * if a default channel is given, an incoming webhook. Secrets are returned once.
  */
 export const POST = route<P>(async (req, { workspaceId }) => {
-  const { sb } = await requireUser(req);
+  const { db } = await requireUser(req);
   const b = await body(req, Create);
-  const res = db(
-    await sb.rpc('create_app', {
-      p_ws: workspaceId,
-      p_name: b.name,
-      p_kind: b.kind,
-      p_description: b.description,
-      p_default_conv: b.default_conversation_id,
-    }),
-  ) as { app: unknown; token: string; webhook_secret: string | null };
+  const row = await db((tx) =>
+    tx.maybe<{ r: { app: unknown; token: string; webhook_secret: string | null } }>(
+      'select create_app($1, $2, $3, $4, $5) as r',
+      [workspaceId, b.name, b.kind, b.description, b.default_conversation_id],
+    ),
+  );
+  const res = row!.r;
   const origin = new URL(req.url).origin;
   return ok(
     {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminClient } from '@/lib/supabase';
+import { asServer } from '@/lib/db';
 
 type P = { secret: string };
 
@@ -15,10 +15,12 @@ export async function POST(req: Request, ctx: { params: Promise<P> }) {
   const parsed = z.object({ text: z.string().min(1).max(40_000) }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return new NextResponse('invalid_payload', { status: 400 });
 
-  const { error } = await adminClient().rpc('webhook_post_message', { p_secret: secret, p_text: parsed.data.text });
-  if (error) {
-    if (error.code === 'P0002') return new NextResponse(error.message, { status: 404 });
-    console.error(error);
+  try {
+    await asServer((tx) => tx.exec('select webhook_post_message($1, $2)', [secret, parsed.data.text]));
+  } catch (e) {
+    const { code, message } = e as { code?: string; message: string };
+    if (code === 'P0002') return new NextResponse(message, { status: 404 });
+    console.error(e);
     return new NextResponse('internal_error', { status: 500 });
   }
   return new NextResponse('ok', { status: 200 });

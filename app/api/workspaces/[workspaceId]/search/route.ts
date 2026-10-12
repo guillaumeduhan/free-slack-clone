@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { requireUser, requireRole } from '@/lib/auth';
-import { route, ok, query, db } from '@/lib/http';
-import { MESSAGE_SELECT, serializeMessages } from '@/lib/messages';
+import { route, ok, query } from '@/lib/http';
+import { selectMessages } from '@/lib/messages';
 
 type P = { workspaceId: string };
 
@@ -12,34 +12,32 @@ const Q = z.object({
 
 /** Global search: people, channels and messages (full-text). */
 export const GET = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireRole(sb, workspaceId, uid);
+  const { uid, db } = await requireUser(req);
   const { q, limit } = query(req, Q);
-  const safe = q.replace(/[,()"\\%_]/g, ' ').trim();
-  const like = `%${safe}%`;
+  const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
-  const [people, channels, messages] = await Promise.all([
-    sb
-      .from('users')
-      .select('id, display_name, title, avatar_url, is_bot, workspace_members!inner(workspace_id, deactivated_at)')
-      .eq('workspace_members.workspace_id', workspaceId)
-      .is('workspace_members.deactivated_at', null)
-      .or(`display_name.ilike."${like}",title.ilike."${like}",email.ilike."${like}"`)
-      .limit(limit),
-    sb
-      .from('conversations')
-      .select('id, kind, name, topic')
-      .eq('workspace_id', workspaceId)
-      .in('kind', ['public_channel', 'private_channel'])
-      .is('archived_at', null)
-      .ilike('name', like)
-      .limit(limit),
-    sb.rpc('search_messages', { p_ws: workspaceId, p_q: q, p_limit: limit }).select(MESSAGE_SELECT),
-  ]);
-
-  return ok({
-    people: db(people).map(({ workspace_members, ...p }) => p),
-    channels: db(channels),
-    messages: await serializeMessages(db(messages), uid),
-  });
+  return ok(
+    await db(async (tx) => {
+      await requireRole(tx, workspaceId, uid);
+      const people = await tx.many(
+        `select u.id, u.display_name, u.title, u.avatar_url, u.is_bot
+           from users u join workspace_members wm on wm.user_id = u.id
+          where wm.workspace_id = $1 and wm.deactivated_at is null
+            and (u.display_name ilike $2 or u.title ilike $2 or u.email ilike $2)
+          order by u.display_name limit $3`,
+        [workspaceId, like, limit],
+      );
+      const channels = await tx.many(
+        `select id, kind, name, topic from conversations
+          where workspace_id = $1 and kind in ('public_channel', 'private_channel') and archived_at is null
+            and name ilike $2
+          order by name limit $3`,
+        [workspaceId, like, limit],
+      );
+      const messages = await selectMessages(
+        tx, uid, 'm.id in (select id from search_messages($1, $2, $3))', [workspaceId, q, limit], 'order by m.created_at desc',
+      );
+      return { people, channels, messages };
+    }),
+  );
 });

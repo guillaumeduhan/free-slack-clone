@@ -1,14 +1,18 @@
 import { z } from 'zod';
 import { requireUser, requireRole, ADMIN } from '@/lib/auth';
-import { route, ok, body, db } from '@/lib/http';
+import { route, ok, body, found } from '@/lib/http';
 
 type P = { workspaceId: string };
 
 export const GET = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  const role = await requireRole(sb, workspaceId, uid);
-  const ws = db(await sb.from('workspaces').select('*').eq('id', workspaceId).single());
-  return ok({ ...ws, role });
+  const { uid, db } = await requireUser(req);
+  return ok(
+    await db(async (tx) => {
+      const role = await requireRole(tx, workspaceId, uid);
+      const ws = found(await tx.maybe('select * from workspaces where id = $1', [workspaceId]));
+      return { ...ws, role };
+    }),
+  );
 });
 
 const Patch = z
@@ -23,16 +27,31 @@ const Patch = z
 
 /** Owner/admin: rename, change URL, description, logo. */
 export const PATCH = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireRole(sb, workspaceId, uid, ADMIN);
+  const { uid, db } = await requireUser(req);
   const patch = await body(req, Patch);
-  return ok(db(await sb.from('workspaces').update(patch).eq('id', workspaceId).select().single()));
+  return ok(
+    await db(async (tx) => {
+      await requireRole(tx, workspaceId, uid, ADMIN);
+      return found(
+        await tx.maybe(
+          `update workspaces set name = coalesce($2, name), slug = coalesce($3, slug),
+                  description = case when $4::boolean then $5 else description end,
+                  logo_url = case when $6::boolean then $7 else logo_url end
+            where id = $1 returning *`,
+          [workspaceId, patch.name ?? null, patch.slug ?? null,
+           'description' in patch, patch.description ?? null, 'logo_url' in patch, patch.logo_url ?? null],
+        ),
+      );
+    }),
+  );
 });
 
 /** Owner only. Cascades to everything in the workspace. */
 export const DELETE = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireRole(sb, workspaceId, uid, ['owner']);
-  db(await sb.from('workspaces').delete().eq('id', workspaceId).select('id').single());
+  const { uid, db } = await requireUser(req);
+  await db(async (tx) => {
+    await requireRole(tx, workspaceId, uid, ['owner']);
+    found(await tx.maybe('delete from workspaces where id = $1 returning id', [workspaceId]));
+  });
   return ok({ deleted: true });
 });

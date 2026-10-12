@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { requireUser, requireConversation } from '@/lib/auth';
-import { route, ok, body, query, db, uuid } from '@/lib/http';
-import { MESSAGE_SELECT, serializeMessages } from '@/lib/messages';
+import { route, ok, body, query, uuid } from '@/lib/http';
+import { selectMessages, selectMessage } from '@/lib/messages';
 
 type P = { conversationId: string };
 
@@ -12,24 +12,22 @@ const Q = z.object({
 
 /** Timeline, newest page first: ?before=<message id>&limit=50. Returned oldest → newest. */
 export const GET = route<P>(async (req, { conversationId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireConversation(sb, conversationId);
+  const { uid, db } = await requireUser(req);
   const { before, limit } = query(req, Q);
-  let q = sb
-    .from('messages')
-    .select(MESSAGE_SELECT)
-    .eq('conversation_id', conversationId)
-    .is('deleted_at', null)
-    .or('parent_id.is.null,also_sent_to_channel.is.true')
-    .order('id', { ascending: false })
-    .limit(limit + 1);
-  if (before) q = q.lt('id', before);
-  const rows = db(await q);
-  const page = rows.slice(0, limit).reverse();
-  return ok({
-    messages: await serializeMessages(page, uid),
-    next_before: rows.length > limit ? page[0].id : null,
-  });
+  return ok(
+    await db(async (tx) => {
+      await requireConversation(tx, conversationId);
+      const rows = await selectMessages(
+        tx, uid,
+        `m.conversation_id = $1 and m.deleted_at is null and (m.parent_id is null or m.also_sent_to_channel)
+         and ($2::bigint is null or m.id < $2)`,
+        [conversationId, before ?? null],
+        `order by m.id desc limit ${limit + 1}`,
+      );
+      const page = rows.slice(0, limit).reverse();
+      return { messages: page, next_before: rows.length > limit ? page[0].id : null };
+    }),
+  );
 });
 
 const Post = z.object({
@@ -39,13 +37,13 @@ const Post = z.object({
 
 /** Send a message. Mentions are parsed, the draft is cleared, my read marker moves. */
 export const POST = route<P>(async (req, { conversationId }) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const { text, file_ids } = await body(req, Post);
-  const msg = db(
-    await sb
-      .rpc('post_message', { p_conv: conversationId, p_body: text, p_parent: null, p_also: false, p_files: file_ids })
-      .select(MESSAGE_SELECT)
-      .single(),
+  return ok(
+    await db(async (tx) => {
+      const m = await tx.maybe<{ id: number }>('select id from post_message($1, $2, null, false, $3::uuid[])', [conversationId, text, file_ids]);
+      return selectMessage(tx, uid, m!.id);
+    }),
+    201,
   );
-  return ok((await serializeMessages([msg], uid))[0], 201);
 });

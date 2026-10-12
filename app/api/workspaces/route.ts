@@ -1,14 +1,19 @@
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
-import { route, ok, body, db } from '@/lib/http';
+import { route, ok, body } from '@/lib/http';
 
 /** Workspaces I belong to, with my role. */
 export const GET = route(async (req) => {
-  const { sb, uid } = await requireUser(req);
-  const rows = db(
-    await sb.from('workspace_members').select('role, workspace:workspaces(*)').eq('user_id', uid).is('deactivated_at', null),
+  const { uid, db } = await requireUser(req);
+  return ok(
+    await db((tx) =>
+      tx.many(
+        `select w.*, wm.role from workspace_members wm join workspaces w on w.id = wm.workspace_id
+          where wm.user_id = $1 and wm.deactivated_at is null order by w.name`,
+        [uid],
+      ),
+    ),
   );
-  return ok(rows.map((r) => ({ ...(r.workspace as object), role: r.role })));
 });
 
 const Create = z.object({
@@ -18,7 +23,7 @@ const Create = z.object({
 
 /** Creates a workspace; the caller becomes owner and joins #general. */
 export const POST = route(async (req) => {
-  const { sb } = await requireUser(req);
+  const { db } = await requireUser(req);
   const { name, slug } = await body(req, Create);
-  return ok(db(await sb.rpc('create_workspace', { p_name: name, p_slug: slug })), 201);
+  return ok(await db((tx) => tx.maybe('select * from create_workspace($1, $2)', [name, slug])), 201);
 });

@@ -1,35 +1,33 @@
 import { z } from 'zod';
 import { requireUser, requireRole, ADMIN } from '@/lib/auth';
-import { route, ok, body, db } from '@/lib/http';
+import { route, ok, body } from '@/lib/http';
 
 type P = { workspaceId: string };
 
 /** Owner/admin: pending invitations. */
 export const GET = route<P>(async (req, { workspaceId }) => {
-  const { sb, uid } = await requireUser(req);
-  await requireRole(sb, workspaceId, uid, ADMIN);
+  const { uid, db } = await requireUser(req);
   return ok(
-    db(
-      await sb
-        .from('invitations')
-        .select('id, email, role, status, invited_by, created_at, expires_at')
-        .eq('workspace_id', workspaceId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false }),
-    ),
+    await db(async (tx) => {
+      await requireRole(tx, workspaceId, uid, ADMIN);
+      return tx.many(
+        `select id, email, role, status, invited_by, created_at, expires_at from invitations
+          where workspace_id = $1 and status = 'pending' order by created_at desc`,
+        [workspaceId],
+      );
+    }),
   );
 });
 
-const Create = z.object({ email: z.string().trim().email(), role: z.enum(['admin', 'member']).default('member') });
+const Create = z.object({ email: z.string().trim().toLowerCase().email(), role: z.enum(['admin', 'member']).default('member') });
 
 /** Owner/admin: invite by email. The link is returned once; send it by email. */
 export const POST = route<P>(async (req, { workspaceId }) => {
-  const { sb } = await requireUser(req);
+  const { db } = await requireUser(req);
   const { email, role } = await body(req, Create);
-  const res = db(await sb.rpc('create_invitation', { p_ws: workspaceId, p_email: email, p_role: role })) as {
-    invitation: unknown;
-    token: string;
-  };
-  const link = new URL(`/invite/${res.token}`, req.url).toString();
-  return ok({ invitation: res.invitation, invite_url: link }, 201);
+  const res = await db((tx) =>
+    tx.maybe<{ r: { invitation: unknown; token: string } }>('select create_invitation($1, $2, $3) as r', [workspaceId, email, role]),
+  );
+  const link = new URL(`/invite/${res!.r.token}`, req.url).toString();
+  return ok({ invitation: res!.r.invitation, invite_url: link }, 201);
 });

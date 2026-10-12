@@ -1,30 +1,43 @@
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
-import { route, ok, body, query, db, check, messageId } from '@/lib/http';
+import { route, ok, body, query, messageId } from '@/lib/http';
 import { summarizeReactions } from '@/lib/messages';
-import type { DB } from '@/lib/supabase';
+import type { Tx } from '@/lib/db';
 
 type P = { messageId: string };
 const Emoji = z.object({ emoji: z.string().trim().min(1).max(32) });
 
-async function summary(sb: DB, id: number, uid: string) {
-  return summarizeReactions(db(await sb.from('reactions').select('emoji, user_id').eq('message_id', id).order('created_at')), uid);
-}
+const summary = async (tx: Tx, id: number, uid: string) =>
+  summarizeReactions(
+    await tx.many<{ emoji: string; user_id: string }>(
+      'select emoji, user_id from reactions where message_id = $1 order by created_at', [id],
+    ),
+    uid,
+  );
 
 /** Add my reaction (idempotent). Returns the message's reaction summary. */
 export const POST = route<P>(async (req, p) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const id = messageId(p.messageId);
   const { emoji } = await body(req, Emoji);
-  check(await sb.from('reactions').upsert({ message_id: id, user_id: uid, emoji }, { ignoreDuplicates: true }));
-  return ok(await summary(sb, id, uid), 201);
+  return ok(
+    await db(async (tx) => {
+      await tx.exec('insert into reactions (message_id, user_id, emoji) values ($1, $2, $3) on conflict do nothing', [id, uid, emoji]);
+      return summary(tx, id, uid);
+    }),
+    201,
+  );
 });
 
 /** Remove my reaction: ?emoji=👍 */
 export const DELETE = route<P>(async (req, p) => {
-  const { sb, uid } = await requireUser(req);
+  const { uid, db } = await requireUser(req);
   const id = messageId(p.messageId);
   const { emoji } = query(req, Emoji);
-  check(await sb.from('reactions').delete().eq('message_id', id).eq('user_id', uid).eq('emoji', emoji));
-  return ok(await summary(sb, id, uid));
+  return ok(
+    await db(async (tx) => {
+      await tx.exec('delete from reactions where message_id = $1 and user_id = $2 and emoji = $3', [id, uid, emoji]);
+      return summary(tx, id, uid);
+    }),
+  );
 });
