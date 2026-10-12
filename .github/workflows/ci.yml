@@ -25,4 +25,4 @@ jobs:
           cat dev.log; exit 1
       - run: npm run smoke
       - if: failure()
-        run: cat dev.log
+        run: cat dev.log || true
