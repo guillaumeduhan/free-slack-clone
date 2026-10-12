@@ -2,16 +2,11 @@
 //   npm run smoke                 (BASE_URL defaults to http://localhost:3002)
 // Signs in as OWNER_EMAIL (dev_code returned outside production), works in a throwaway
 // workspace with an invited teammate, then deletes everything it created.
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import pg from 'pg';
-
-const root = join(import.meta.dirname, '..');
-for (const f of ['.env.local', '.env']) if (existsSync(join(root, f))) process.loadEnvFile(join(root, f));
+import './env.mjs';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3002';
 const OWNER = process.env.OWNER_EMAIL;
-if (!OWNER) throw new Error('OWNER_EMAIL is not set');
 
 let failures = 0;
 const check = (label, cond, extra) => {

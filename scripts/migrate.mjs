@@ -2,18 +2,12 @@
 //   node scripts/migrate.mjs            migrate
 //   node scripts/migrate.mjs --seed     migrate + seed (WORKSPACE_NAME with #general, OWNER_EMAIL invited as owner)
 //   node scripts/migrate.mjs --reset    drop the "chat" schema first
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import pg from 'pg';
-
-const root = join(import.meta.dirname, '..');
-for (const f of ['.env.local', '.env']) if (existsSync(join(root, f))) process.loadEnvFile(join(root, f));
+import { root } from './env.mjs';
 
 const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error('DATABASE_URL is not set (see .env.example).');
-  process.exit(1);
-}
 const args = new Set(process.argv.slice(2));
 const client = new pg.Client({ connectionString: url });
 await client.connect();
